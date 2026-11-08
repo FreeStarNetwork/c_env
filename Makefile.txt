@@ -1,0 +1,62 @@
+# C compiler
+CC := gcc
+
+# Debug build: warnings, debug symbols, ASAN + UBSAN sanitizer, no‑optimization
+CFLAGS_DEBUG := -Wall -Wextra -Wpedantic -g -O0 -fsanitize=address,undefined
+LDFLAGS_DEBUG := -fsanitize=address,undefined
+
+# Release build: full optimization, strict warnings
+CFLAGS_RELEASE := -Wall -Wextra -Wpedantic -O2
+LDFLAGS_RELEASE :=
+
+# output target base name
+TARGET := main
+# collect *.c source files in current directory (flat‑directory project)
+SRCS := $(wildcard *.c)
+
+# separate object files for debug / release builds
+OBJS_DEBUG := $(SRCS:.c=.debug.o)
+OBJS_RELEASE := $(SRCS:.c=.release.o)
+
+.PHONY: all debug release clean cscope tags idx
+
+# default target builds debug binary
+all: debug
+
+debug: $(TARGET).debug
+$(TARGET).debug: $(OBJS_DEBUG)
+	$(CC) $(OBJS_DEBUG) -o $@ $(LDFLAGS_DEBUG)
+
+%.debug.o: %.c
+	$(CC) $(CFLAGS_DEBUG) -c $< -o $@
+
+release: $(TARGET).release
+$(TARGET).release: $(OBJS_RELEASE)
+	$(CC) $(OBJS_RELEASE) -o $@ $(LDFLAGS_RELEASE)
+
+%.release.o: %.c
+	$(CC) $(CFLAGS_RELEASE) -c $< -o $@
+
+# generate universal‑ctags symbol index for C sources and headers
+tags:
+	ctags -R --fields=+l *.[ch]
+
+# generate cscope database, limit directory scan depth to 2
+cscope:
+	find . -maxdepth 2 -name "*.[ch]" > cscope.files
+	cscope -bq
+
+# meta‑target: build both tags and cscope indexes
+idx: tags cscope
+
+# remove build artifacts and index database files
+clean:
+	rm -f $(OBJS_DEBUG) $(OBJS_RELEASE) $(TARGET).debug $(TARGET).release
+	rm -f cscope.out cscope.files tags
+
+# usage reference
+# make         → build debug binary
+# make debug   → build debug binary
+# make release → build optimized release binary
+# make clean   → delete build outputs and index files
+

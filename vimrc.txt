@@ -1,0 +1,212 @@
+set nocompatible
+filetype on
+filetype indent on
+syntax enable
+set encoding=utf-8
+set termencoding=utf-8
+set autoindent
+set smartindent
+set number
+set relativenumber
+set colorcolumn=80
+set hlsearch
+nnoremap <silent> <leader><space> :nohlsearch<CR>
+
+" ---------- built‑in vim gdb debugger plugin ----------
+packadd! termdebug
+if exists('g:termdebug_config')
+    let g:termdebug_config['map_K'] = v:false
+endif
+
+function! g:TermdebugToggleBp()
+    local file = expand('%:p')
+    local line_nr = line('.')
+    local bp_out = TermDebugSendCommand('info breakpoints')
+    local pattern = '\<'.file.'\:' . line_nr . '\>'
+    if bp_out =~ pattern
+        let match_line = matchstr(bp_out, '^\s*\d\+\ze.*' . pattern)
+        let bp_num = str2nr(match_line)
+        call TermDebugSendCommand('delete ' . bp_num)
+        echo "Breakpoint removed: line ".line_nr
+    else
+        call TermDebugSendCommand('break ' . file . ':' . line_nr)
+        echo "Breakpoint set: line ".line_nr
+    endif
+endfunction
+
+nnoremap <F5>  :call TermDebugSendCommand('continue')<CR>
+nnoremap <F7> :call TermDebugSendCommand('print ' . expand('<cword>'))<CR>
+nnoremap <F9>  :call g:TermdebugToggleBp()<CR>
+nnoremap <F10> :call TermDebugSendCommand('next')<CR>
+nnoremap <F11> :call TermDebugSendCommand('step')<CR>
+nnoremap <leader>fo :call TermDebugSendCommand('finish')<CR>
+nnoremap <leader>fk :call TermDebugSendCommand('kill')<CR>:TermdebugStop<CR>
+
+" ---------- tpope opt plugins ----------
+packadd! vim-repeat
+packadd! vim-surround
+packadd! vim-commentary
+autocmd FileType c,h setlocal commentstring=//\ %s
+packadd! vim-fugitive
+
+" ---------- vendor opt plugins ----------
+packadd! ctrlp
+let g:ctrlp_custom_ignore = '\v[\/](build|out|\.git|cscope\.out|tags)$'
+nnoremap <C-p> :CtrlP<CR>
+
+packadd! tagbar
+let g:tagbar_ctags_bin = 'ctags'
+nnoremap <F4> :TagbarToggle<CR>
+set tags=./tags,../tags,../../tags
+
+packadd! editorconfig-vim
+
+packadd! ale
+let g:ale_linters = {'c': ['gcc']}
+nnoremap <silent> <C-k> <Plug>(ale_previous_wrap)
+nnoremap <silent> <C-j> <Plug>(ale_next_wrap)
+
+packadd! vim-airline
+packadd! vim-airline-themes
+let g:airline#extensions#tabline#enabled = 1
+let g:airline#extensions#tabline#buffer_nr_show = 1
+nnoremap <F2> :bprevious<CR>
+nnoremap <F3> :bnext<CR>
+
+" -----------------------------------------------------------------------------
+" Gemini C‑code assistant
+" \gn       reset chat session
+" \ga       visual‑select: audit snippet
+" \gA       normal mode: audit whole file
+" \gr       visual‑select: refactor selected code
+" \gg       normal mode: manual prompt input, insert generated code below cursor
+" \gc       normal mode: multi‑line // comment block as requirement, insert code after block
+" -----------------------------------------------------------------------------
+nnoremap <leader>gn :!./gemini.sh new<CR>
+
+vnoremap <leader>ga :<C-u>call g:GeminiAuditSel()<CR>
+function! g:GeminiAuditSel() range
+    let prompt = 'Audit this snippet, find undefined‑behavior, memory‑safety defects, type risks. Output concise conclusions.'
+    silent "'<,'>w !./gemini.sh ask -"
+endfunction
+
+nnoremap <leader>gA :call g:GeminiAuditFile()<CR>
+function! g:GeminiAuditFile()
+    let prompt = 'Audit this complete source file, find undefined‑behavior, memory leaks, buffer‑overflow, type‑safety issues. Give short conclusion list.'
+    echo system("printf '%s\n' " . shellescape(prompt) . " | cat - " . shellescape(expand('%')) . " | ./gemini.sh ask -")
+endfunction
+
+vnoremap <leader>gr :<C-u>call g:GeminiRefactorSel()<CR>
+function! g:GeminiRefactorSel() range
+    let prompt = 'Refactor this code, preserve original logic, improve safety and readability.'
+    silent "'<,'>w !./gemini.sh ask -"
+endfunction
+
+nnoremap <leader>gg :call g:GeminiGenQuery()<CR>
+function! g:GeminiGenQuery()
+    let user_input = input("Generate code prompt: ")
+    if empty(user_input)
+        return
+    endif
+    let prompt = 'Write concise standard code for: ' . user_input
+    let resp = system("printf '%s\n' " . shellescape(prompt) . " | ./gemini.sh ask -")
+    call append(line('.'), split(resp, "\n"))
+endfunction
+
+function! g:GetMultiLineComment()
+    let start = line('.')
+    let endln = line('.')
+    let l = start
+    while l >= 1
+        let ln = getline(l)
+        if ln =~ '^\s*//'
+            let start = l
+            let l -= 1
+        else
+            break
+        endif
+    endwhile
+    let l = endln + 1
+    while l <= line('$')
+        let ln = getline(l)
+        if ln =~ '^\s*//'
+            let endln = l
+            let l += 1
+        else
+            break
+        endif
+    endwhile
+    let block_text = join(getline(start, endln), "\n")
+    return {'text': block_text, 'end_line': endln}
+endfunction
+
+nnoremap <leader>gc :call g:GeminiGenFromComment()<CR>
+function! g:GeminiGenFromComment()
+    let comm = g:GetMultiLineComment()
+    let comment_block = comm.text
+    let block_end = comm.end_line
+    if empty(comment_block)
+        echo "Error: could not find // comment block under cursor"
+        return
+    endif
+    let prompt = 'Following this multi‑line requirement comment, write compact standard implementation. Requirement:' . comment_block
+    let resp = system("printf '%s\n' " . shellescape(prompt) . " | ./gemini.sh ask -")
+    call append(block_end, split(resp, "\n"))
+    echo "Code inserted after multi‑line comment block"
+endfunction
+
+" -----------------------------------------------------------------------------
+" Doubao (Volcano Ark English C assistant)
+" \dbn       reset cloud session
+" \dba       visual‑select: audit snippet
+" \dbA       normal mode: audit whole file
+" \dbr       visual‑select: refactor selected code
+" \dbg       normal mode: manual prompt input, insert generated code below cursor
+" \dbc       normal mode: multi‑line // comment block as requirement, insert code after block
+" -----------------------------------------------------------------------------
+nnoremap <leader>dbn :!./doubao.sh new<CR>
+
+vnoremap <leader>dba :<C-u>call g:DoubaoAuditSel()<CR>
+function! g:DoubaoAuditSel() range
+    let prompt = 'Audit this snippet, find undefined‑behavior, memory‑safety defects, type risks. Output concise conclusions.'
+    silent "'<,'>w !./doubao.sh ask -"
+endfunction
+
+nnoremap <leader>dbA :call g:DoubaoAuditFile()<CR>
+function! g:DoubaoAuditFile()
+    let prompt = 'Audit this complete source file, find undefined‑behavior, memory leaks, buffer‑overflow, type‑safety issues. Give short conclusion list.'
+    echo system("printf '%s\n' " . shellescape(prompt) . " | cat - " . shellescape(expand('%')) . " | ./doubao.sh ask -")
+endfunction
+
+vnoremap <leader>dbr :<C-u>call g:DoubaoRefactorSel()<CR>
+function! g:DoubaoRefactorSel() range
+    let prompt = 'Refactor this code, preserve original logic, improve safety and readability.'
+    silent "'<,'>w !./doubao.sh ask -"
+endfunction
+
+nnoremap <leader>dbg :call g:DoubaoGenQuery()<CR>
+function! g:DoubaoGenQuery()
+    let user_input = input("Doubao generate code prompt: ")
+    if empty(user_input)
+        return
+    endif
+    let prompt = 'Write concise standard C99 code for: ' . user_input
+    let resp = system("printf '%s\n' " . shellescape(prompt) . " | ./doubao.sh ask -")
+    call append(line('.'), split(resp, "\n"))
+endfunction
+
+nnoremap <leader>dbc :call g:DoubaoGenFromComment()<CR>
+function! g:DoubaoGenFromComment()
+    let comm = g:GetMultiLineComment()
+    let comment_block = comm.text
+    let block_end = comm.end_line
+    if empty(comment_block)
+        echo "Error: could not find // comment block under cursor"
+        return
+    endif
+    let prompt = 'Following this multi‑line requirement comment, write compact standard C99 implementation. Requirement:' . comment_block
+    let resp = system("printf '%s\n' " . shellescape(prompt) . " | ./doubao.sh ask -")
+    call append(block_end, split(resp, "\n"))
+    echo "Doubao code inserted after multi‑line comment block"
+endfunction
+
